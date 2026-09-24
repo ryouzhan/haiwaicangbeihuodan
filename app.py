@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""海外仓备货发货单智能处理工具 (Web版) - 格式100%严格对齐标准发货单导出模板"""
+"""海外仓备货发货单智能处理工具 (Web版) - 格式100%严格对齐标准发货单导出模板（无箱号则留空）"""
 
 from collections import defaultdict
 from datetime import datetime
@@ -240,7 +240,6 @@ def parse_raw_order_file(uploaded_file):
 
 
 def get_warehouse_code(addr):
-  """提取物流中心编码，附带美西/美东分区，如 'GYR3(美西)' 或 'AWD仓'"""
   addr = str(addr).strip()
   if not addr or addr in ("nan", "None"):
     return "AWD仓"
@@ -481,23 +480,22 @@ def process_shipment_data(
   df_detail["货件编号"] = order_code
   df_detail["ReferenceId"] = df_m.get("ReferenceId", "")
 
-  # 自动生成连续箱号 (如 1-9, 10-18)
-  box_nums = []
-  current_box_start = 1
-  for b_count in df_detail["箱数"]:
-    if b_count <= 0:
-      box_nums.append("")
-    elif b_count == 1:
-      box_nums.append(str(current_box_start))
-      current_box_start += 1
-    else:
-      end_box = current_box_start + b_count - 1
-      box_nums.append(f"{current_box_start}-{end_box}")
-      current_box_start = end_box + 1
-  df_detail["箱号"] = box_nums
+  # ---------- 【修改：取消自动连续编号，没有就留空】 ----------
+  box_col = pd.Series("", index=df_m.index)
+  for c in ["箱号", "箱号(装箱信息)", "箱号(发货商品)"]:
+    if c in df_m.columns:
+      s = df_m[c].fillna("").astype(str).str.strip()
+      s = s.replace(["nan", "None"], "")
+      box_col = np.where(box_col != "", box_col, s)
+  df_detail["箱号"] = box_col
 
-  total_box_count = int(df_detail["箱数"].sum())
-  df_detail["总箱数编号"] = total_box_count if total_box_count > 0 else ""
+  z_code = pd.Series("", index=df_m.index)
+  for c in ["总箱数编号", "总箱数", "申报量(货件)"]:
+    if c in df_m.columns:
+      s = df_m[c].fillna("").astype(str).str.strip()
+      s = s.replace(["nan", "None"], "")
+      z_code = np.where(z_code != "", z_code, s)
+  df_detail["总箱数编号"] = z_code
 
   # 重量与尺寸
   df_detail["外箱重量(kg)"] = np.where(
@@ -535,12 +533,11 @@ def process_shipment_data(
   df_detail["发货时间"] = df_m.get("发货时间", "")
   df_detail["物流商"] = df_m.get("物流商", "")
 
-  # 空值彻底格式化为空字符串（留空）
+  # 确保无内容单元格彻底留空
   df_detail.fillna("", inplace=True)
   df_detail.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
 
   # ---------- 2. 构建严格匹配的【汇总结果】(9列) ----------
-  # 按照模板定义：['物流中心编码', '货件编号', 'ReferenceId', '品名', '供应商', '总箱数', '外箱总重量', '外箱总体积', '外箱总体积重(kg)']
   num_boxes = int(df_detail["箱数"].sum())
   sum_weight = (
       pd.to_numeric(df_detail["外箱总重量(kg)"], errors="coerce")
@@ -595,7 +592,7 @@ def process_shipment_data(
   return df_detail, df_summary, kpi_metrics, list(set(missing_skus))
 
 
-# ==================== 5. 专业 Excel 导出美化 (原汁原味) ====================
+# ==================== 5. 专业 Excel 导出美化 ====================
 def export_and_beautify(df_detail, df_summary):
   output = io.BytesIO()
   with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -655,7 +652,7 @@ def main():
   st.markdown(
       """
     <div class="header-box">
-        <div class="header-badge">Shipment Generator V9.2</div>
+        <div class="header-badge">Shipment Generator V9.3</div>
         <h1 class="header-title">发货单智能生成工具</h1>
         <p class="header-subtitle">输出格式100%对齐标准模板 · 物流关联单号联动 · 智能商品库规格匹配</p>
     </div>
