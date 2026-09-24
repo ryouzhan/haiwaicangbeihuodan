@@ -731,7 +731,7 @@ def main():
     table_pill_label = f"🔴 {table_label} ▾"
 
   # 2. 居中单个商品库胶囊（3 个权重分栏，彻底杜绝解包报错）
-  col_l, col_center, col_r = st.columns()
+  col_l, col_center, col_r = st.columns(3)
   with col_center:
     with st.popover(table_pill_label, use_container_width=True):
       st.caption("临时更换商品库（仅本次生效）：")
