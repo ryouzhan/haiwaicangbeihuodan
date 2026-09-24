@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""海外仓备货发货单智能生成工具 (纯净极简版) - 无特殊映射 · 在线商品库自动同步 · 格式严格对齐标准模板"""
+"""海外仓备货发货单智能生成工具 (纯净极简版) - 无特殊映射 · 在线商品库自动同步 · 彻底解决 float64 类型冲突"""
 
 from collections import defaultdict
 from datetime import datetime
@@ -289,6 +289,7 @@ def parse_raw_order_file(uploaded_file):
   goods_df = goods_df.loc[:, ~goods_df.columns.str.startswith("Unnamed")]
   goods_df.dropna(how="all", inplace=True)
 
+  # 从【物流信息】中定位【关联备货单号】
   related_order_code = ""
   for row_idx in range(cut_idx, len(df_raw)):
     row_vals = [str(v).strip() for v in df_raw.iloc[row_idx].values]
@@ -445,7 +446,7 @@ def process_shipment_data(goods_df, order_code, commodities_df):
       if p_col in matched:
         val = pd.to_numeric(matched[p_col], errors="coerce")
         if not np.isnan(val) and val > 0:
-          price_val = val
+          price_val = float(val)
           break
     item["_单价"] = price_val
 
@@ -475,49 +476,17 @@ def process_shipment_data(goods_df, order_code, commodities_df):
 
   df_m = pd.DataFrame(merged_rows)
 
-  detail_cols = [
-      "SKU",
-      "品名",
-      "商品图片",
-      "发货量",
-      "箱数",
-      "单箱数量",
-      "物流中心编码",
-      "供应商",
-      "货件编号",
-      "ReferenceId",
-      "箱号",
-      "总箱数编号",
-      "外箱重量(kg)",
-      "外箱总重量(kg)",
-      "外箱长(cm)",
-      "外箱宽(cm)",
-      "外箱高(cm)",
-      "外箱体积(m³)",
-      "外箱总体积(m³)",
-      "外箱总体积重(kg)",
-      "创建时间",
-      "发货时间",
-      "物流商",
-  ]
-
-  df_detail = pd.DataFrame(columns=detail_cols)
-  df_detail["SKU"] = df_m["SKU"]
-  df_detail["品名"] = df_m["_品名"]
-  df_detail["商品图片"] = df_m["_图片"]
-  df_detail["单箱数量"] = df_m["_单箱数量"]
-
+  # 发货量与箱数
+  carton_series = df_m["_单箱数量"].astype(int)
   if "箱数" in df_m.columns and "备货量" in df_m.columns:
-    df_detail["箱数"] = (
+    box_series = (
         pd.to_numeric(df_m["箱数"], errors="coerce").fillna(0).astype(int)
     )
-    df_detail["发货量"] = (
+    qty_series = (
         pd.to_numeric(df_m["备货量"], errors="coerce").fillna(0).astype(int)
     )
-    df_detail["发货量"] = np.where(
-        df_detail["发货量"] > 0,
-        df_detail["发货量"],
-        df_detail["箱数"] * df_detail["单箱数量"],
+    qty_series = np.where(
+        qty_series > 0, qty_series, box_series * carton_series
     )
   else:
     raw_qty = (
@@ -528,120 +497,141 @@ def process_shipment_data(goods_df, order_code, commodities_df):
         .fillna(0)
         .astype(int)
     )
-    safe_c = np.where(df_detail["单箱数量"] > 0, df_detail["单箱数量"], 1)
-    df_detail["箱数"] = np.where(
-        df_detail["单箱数量"] > 0, np.ceil(raw_qty / safe_c).astype(int), 0
+    safe_c = np.where(carton_series > 0, carton_series, 1)
+    box_series = np.where(
+        carton_series > 0, np.ceil(raw_qty / safe_c).astype(int), 0
     )
-    df_detail["发货量"] = raw_qty
+    qty_series = raw_qty
 
   addr_raw = ""
   for col in ["物流中心编码", "收货仓库", "配送地址"]:
     if col in df_m.columns and not df_m[col].dropna().empty:
       addr_raw = str(df_m[col].dropna().iloc[0]).strip()
       break
-  df_detail["物流中心编码"] = get_warehouse_code(addr_raw)
+  wh_code = get_warehouse_code(addr_raw)
 
-  df_detail["供应商"] = df_m["_供应商"]
-  df_detail["货件编号"] = order_code
-  df_detail["ReferenceId"] = df_m.get("ReferenceId", "")
-
-  # 箱号与总箱数编号：原表无则彻底留空
-  box_col = pd.Series("", index=df_m.index)
+  # 箱号与总箱数编号
+  box_col = []
   for c in ["箱号", "箱号(装箱信息)", "箱号(发货商品)"]:
     if c in df_m.columns:
       s = df_m[c].fillna("").astype(str).str.strip()
       s = s.replace(["nan", "None"], "")
-      box_col = np.where(box_col != "", box_col, s)
-  df_detail["箱号"] = box_col
+      if any(x != "" for x in s):
+        box_col = s.tolist()
+        break
+  if not box_col:
+    box_col = ["" for _ in range(len(df_m))]
 
-  z_code = pd.Series("", index=df_m.index)
+  z_col = []
   for c in ["总箱数编号", "总箱数", "申报量(货件)"]:
     if c in df_m.columns:
       s = df_m[c].fillna("").astype(str).str.strip()
       s = s.replace(["nan", "None"], "")
-      z_code = np.where(z_code != "", z_code, s)
-  df_detail["总箱数编号"] = z_code
+      if any(x != "" for x in s):
+        z_col = s.tolist()
+        break
+  if not z_col:
+    z_col = ["" for _ in range(len(df_m))]
 
-  df_detail["外箱重量(kg)"] = np.where(
-      df_m["_重量"] > 0, df_m["_重量"].round(2), ""
-  )
-  total_w = (df_m["_重量"] * df_detail["箱数"]).round(2)
-  df_detail["外箱总重量(kg)"] = np.where(total_w > 0, total_w, "")
+  # 体积与重量计算 (完全使用纯 Python 列表推导式，彻底杜绝 float64 写入 '' 报错)
+  vols = [
+      (l * w * h) / 1000000
+      for l, w, h in zip(df_m["_长"], df_m["_宽"], df_m["_高"])
+  ]
 
-  df_detail["外箱长(cm)"] = np.where(
-      df_m["_长"] > 0, df_m["_长"].round(1), ""
-  )
-  df_detail["外箱宽(cm)"] = np.where(
-      df_m["_宽"] > 0, df_m["_宽"].round(1), ""
-  )
-  df_detail["外箱高(cm)"] = np.where(
-      df_m["_高"] > 0, df_m["_高"].round(1), ""
-  )
-
-  vol = (df_m["_长"] * df_m["_宽"] * df_m["_高"]) / 1000000
-  df_detail["外箱体积(m³)"] = np.where(vol > 0, vol.round(4), "")
-  tot_vol = (vol * df_detail["箱数"]).round(4)
-  df_detail["外箱总体积(m³)"] = np.where(tot_vol > 0, tot_vol, "")
-
-  tot_vwt = (tot_vol * 167).round(2)
-  df_detail["外箱总体积重(kg)"] = np.where(tot_vwt > 0, tot_vwt, "")
+  weight_list = [
+      round(float(x), 2) if float(x) > 0 else "" for x in df_m["_重量"]
+  ]
+  tot_weight_list = [
+      round(float(x) * int(b), 2) if (float(x) * int(b)) > 0 else ""
+      for x, b in zip(df_m["_重量"], box_series)
+  ]
+  length_list = [round(float(x), 1) if float(x) > 0 else "" for x in df_m["_长"]]
+  width_list = [round(float(x), 1) if float(x) > 0 else "" for x in df_m["_宽"]]
+  height_list = [round(float(x), 1) if float(x) > 0 else "" for x in df_m["_高"]]
+  vol_list = [round(float(v), 4) if float(v) > 0 else "" for v in vols]
+  tot_vol_list = [
+      round(float(v) * int(b), 4) if (float(v) * int(b)) > 0 else ""
+      for v, b in zip(vols, box_series)
+  ]
+  tot_vwt_list = [
+      round(float(v) * int(b) * 167, 2) if (float(v) * int(b) * 167) > 0 else ""
+      for v, b in zip(vols, box_series)
+  ]
 
   created_t = df_m.get("创建时间", "")
   if isinstance(created_t, pd.Series) and not created_t.dropna().empty:
-    df_detail["创建时间"] = created_t.iloc[0]
+    ctime = str(created_t.iloc[0]).strip()
   else:
-    df_detail["创建时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ctime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-  df_detail["发货时间"] = df_m.get("发货时间", "")
-  df_detail["物流商"] = df_m.get("物流商", "")
-
-  df_detail.fillna("", inplace=True)
-  df_detail.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
-
-  num_boxes = int(df_detail["箱数"].sum())
-  sum_weight = (
-      pd.to_numeric(df_detail["外箱总重量(kg)"], errors="coerce")
-      .fillna(0)
-      .sum()
-  )
-  sum_volume = (
-      pd.to_numeric(df_detail["外箱总体积(m³)"], errors="coerce")
-      .fillna(0)
-      .sum()
-  )
-  sum_vol_weight = (
-      pd.to_numeric(df_detail["外箱总体积重(kg)"], errors="coerce")
-      .fillna(0)
-      .sum()
-  )
-
-  summary_row = {
-      "物流中心编码": df_detail["物流中心编码"].iloc[0]
-      if not df_detail.empty
-      else "AWD仓",
-      "货件编号": order_code,
-      "ReferenceId": df_detail["ReferenceId"].iloc[0]
-      if not df_detail.empty
-      else "",
-      "品名": df_detail["品名"].iloc[0] if not df_detail.empty else "",
-      "供应商": df_detail["供应商"].iloc[0] if not df_detail.empty else "",
-      "总箱数": num_boxes,
-      "外箱总重量": round(sum_weight, 2) if sum_weight > 0 else "",
-      "外箱总体积": round(sum_volume, 4) if sum_volume > 0 else "",
-      "外箱总体积重(kg)": round(sum_vol_weight, 2)
-      if sum_vol_weight > 0
-      else "",
+  # 构建【详细数据】(23 列严格对齐字典)
+  detail_data = {
+      "SKU": df_m["SKU"].tolist(),
+      "品名": df_m["_品名"].tolist(),
+      "商品图片": df_m["_图片"].tolist(),
+      "发货量": qty_series.tolist(),
+      "箱数": box_series.tolist(),
+      "单箱数量": carton_series.tolist(),
+      "物流中心编码": [wh_code for _ in range(len(df_m))],
+      "供应商": df_m["_供应商"].tolist(),
+      "货件编号": [order_code for _ in range(len(df_m))],
+      "ReferenceId": df_m.get(
+          "ReferenceId", pd.Series([""] * len(df_m))
+      ).tolist(),
+      "箱号": box_col,
+      "总箱数编号": z_col,
+      "外箱重量(kg)": weight_list,
+      "外箱总重量(kg)": tot_weight_list,
+      "外箱长(cm)": length_list,
+      "外箱宽(cm)": width_list,
+      "外箱高(cm)": height_list,
+      "外箱体积(m³)": vol_list,
+      "外箱总体积(m³)": tot_vol_list,
+      "外箱总体积重(kg)": tot_vwt_list,
+      "创建时间": [ctime for _ in range(len(df_m))],
+      "发货时间": df_m.get("发货时间", pd.Series([""] * len(df_m))).tolist(),
+      "物流商": df_m.get("物流商", pd.Series([""] * len(df_m))).tolist(),
   }
-  df_summary = pd.DataFrame([summary_row])
-  df_summary.fillna("", inplace=True)
-  df_summary.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
 
-  total_pcs_sum = int((df_detail["发货量"] * df_m["_单品PCS"]).sum())
-  total_val_sum = (df_detail["发货量"] * df_m["_单价"]).round(2).sum()
+  df_detail = pd.DataFrame(detail_data)
+  # 统一转为 object 彻底防崩溃
+  df_detail = df_detail.astype(object)
+  df_detail = df_detail.replace({"nan": "", "None": "", np.nan: "", None: ""})
+
+  # 构建【汇总结果】(9 列严格对齐)
+  num_boxes = int(sum(box_series))
+  sum_weight = sum(
+      [float(x) for x in tot_weight_list if isinstance(x, (int, float))]
+  )
+  sum_volume = sum(
+      [float(x) for x in tot_vol_list if isinstance(x, (int, float))]
+  )
+  sum_vol_weight = sum(
+      [float(x) for x in tot_vwt_list if isinstance(x, (int, float))]
+  )
+
+  summary_data = {
+      "物流中心编码": [wh_code],
+      "货件编号": [order_code],
+      "ReferenceId": [df_detail["ReferenceId"].iloc[0] if len(df_m) > 0 else ""],
+      "品名": [df_detail["品名"].iloc[0] if len(df_m) > 0 else ""],
+      "供应商": [df_detail["供应商"].iloc[0] if len(df_m) > 0 else ""],
+      "总箱数": [num_boxes],
+      "外箱总重量": [round(sum_weight, 2) if sum_weight > 0 else ""],
+      "外箱总体积": [round(sum_volume, 4) if sum_volume > 0 else ""],
+      "外箱总体积重(kg)": [round(sum_vol_weight, 2) if sum_vol_weight > 0 else ""],
+  }
+  df_summary = pd.DataFrame(summary_data).astype(object)
+  df_summary = df_summary.replace({"nan": "", "None": "", np.nan: "", None: ""})
+
+  # KPI 看板数据
+  total_pcs_sum = int(sum(qty_series * df_m["_单品PCS"].astype(int)))
+  total_val_sum = round(sum(qty_series * df_m["_单价"].astype(float)), 2)
 
   kpi_metrics = {
       "total_box": num_boxes,
-      "total_sets": int(df_detail["发货量"].sum()),
+      "total_sets": int(sum(qty_series)),
       "total_pcs": total_pcs_sum,
       "total_weight": f"{sum_weight:,.2f}" if sum_weight > 0 else "0",
       "total_volume": f"{sum_volume:,.3f}" if sum_volume > 0 else "0",
@@ -711,7 +701,7 @@ def main():
   st.markdown(
       """
     <div class="header-box">
-        <div class="header-badge">✨ SHIPMENT GENERATOR V9.5</div>
+        <div class="header-badge">✨ SHIPMENT GENERATOR V9.6</div>
         <h1 class="header-title">发货单智能生成工具</h1>
         <p class="header-subtitle">输出格式 100% 对齐标准模板 · 物流关联单号联动 · 智能商品库规格匹配</p>
     </div>
@@ -730,7 +720,7 @@ def main():
   else:
     table_pill_label = f"🔴 {table_label} ▾"
 
-  # 2. 居中单个商品库胶囊（3 个权重分栏，彻底杜绝解包报错）
+  # 2. 居中单个商品库胶囊
   col_l, col_center, col_r = st.columns(3)
   with col_center:
     with st.popover(table_pill_label, use_container_width=True):
