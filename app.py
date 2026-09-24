@@ -35,14 +35,12 @@ st.markdown(
     }
     #MainMenu, footer, header { visibility: hidden; }
 
-    /* 约束主工作区宽度，精致居中 */
     .block-container {
         max-width: 820px !important;
         padding-top: 2.2rem !important;
         padding-bottom: 3.5rem !important;
     }
 
-    /* 顶部标题区 */
     .header-box {
         text-align: center;
         padding: 0.5rem 0 0.8rem 0;
@@ -76,7 +74,6 @@ st.markdown(
         font-weight: 400;
     }
 
-    /* 顶部居中单个商品库胶囊 */
     div[data-testid="stPopover"] > button {
         background-color: #FFFFFF !important;
         color: #334155 !important;
@@ -101,7 +98,6 @@ st.markdown(
         box-shadow: 0 10px 25px rgba(0,0,0,0.08) !important;
     }
 
-    /* 上传框纯白高质感卡片 */
     [data-testid="stFileUploader"] {
         background: transparent !important;
     }
@@ -135,7 +131,6 @@ st.markdown(
         display: none !important;
     }
 
-    /* 6 项 KPI 核心指标精美网格卡片 */
     .metric-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -177,7 +172,6 @@ st.markdown(
         margin-left: 0.25rem;
     }
 
-    /* 导出下载按钮 */
     .stDownloadButton button {
         background: #0F172A !important;
         color: #FFFFFF !important;
@@ -295,7 +289,6 @@ def parse_raw_order_file(uploaded_file):
   goods_df = goods_df.loc[:, ~goods_df.columns.str.startswith("Unnamed")]
   goods_df.dropna(how="all", inplace=True)
 
-  # 从【物流信息】中定位【关联备货单号】
   related_order_code = ""
   for row_idx in range(cut_idx, len(df_raw)):
     row_vals = [str(v).strip() for v in df_raw.iloc[row_idx].values]
@@ -400,7 +393,6 @@ def process_shipment_data(goods_df, order_code, commodities_df):
         f"ZF-{raw_sku}" if not raw_sku.upper().startswith("ZF-") else raw_sku
     )
 
-    # 优先精确匹配，其次智能穿透 ZF- 前缀
     matched = (
         comm_dict.get(raw_sku)
         or comm_dict.get(no_zf_sku)
@@ -483,7 +475,6 @@ def process_shipment_data(goods_df, order_code, commodities_df):
 
   df_m = pd.DataFrame(merged_rows)
 
-  # ---------- 1. 构建严格对齐的【详细数据】(23列) ----------
   detail_cols = [
       "SKU",
       "品名",
@@ -571,7 +562,6 @@ def process_shipment_data(goods_df, order_code, commodities_df):
       z_code = np.where(z_code != "", z_code, s)
   df_detail["总箱数编号"] = z_code
 
-  # 重量与尺寸
   df_detail["外箱重量(kg)"] = np.where(
       df_m["_重量"] > 0, df_m["_重量"].round(2), ""
   )
@@ -608,7 +598,6 @@ def process_shipment_data(goods_df, order_code, commodities_df):
   df_detail.fillna("", inplace=True)
   df_detail.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
 
-  # ---------- 2. 构建严格对齐的【汇总结果】(9列) ----------
   num_boxes = int(df_detail["箱数"].sum())
   sum_weight = (
       pd.to_numeric(df_detail["外箱总重量(kg)"], errors="coerce")
@@ -719,7 +708,6 @@ def export_and_beautify(df_detail, df_summary):
 
 # ==================== 6. 主程序与界面交互 ====================
 def main():
-  # 顶部标题 Header
   st.markdown(
       """
     <div class="header-box">
@@ -742,8 +730,8 @@ def main():
   else:
     table_pill_label = f"🔴 {table_label} ▾"
 
-  # 2. 居中单个商品库胶囊（极简精致）
-  col_l, col_center, col_r = st.columns(2)
+  # 2. 居中单个商品库胶囊（3 个权重分栏，彻底杜绝解包报错）
+  col_l, col_center, col_r = st.columns()
   with col_center:
     with st.popover(table_pill_label, use_container_width=True):
       st.caption("临时更换商品库（仅本次生效）：")
