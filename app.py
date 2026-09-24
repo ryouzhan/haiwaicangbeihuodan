@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""海外仓备货发货单智能处理工具 (Web版) - 格式100%严格对齐标准发货单导出模板（无箱号则留空）"""
+"""海外仓备货发货单智能生成工具 (纯净极简版) - 无特殊映射 · 在线商品库自动同步 · 格式严格对齐标准模板"""
 
 from collections import defaultdict
 from datetime import datetime
@@ -17,11 +17,11 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pandas as pd
 import streamlit as st
 
-# ==================== 1. 页面全局配置与极简样式 ====================
+# ==================== 1. 页面全局配置与定制高质感 CSS ====================
 st.set_page_config(
-    page_title="发货单处理工具",
+    page_title="发货单智能生成工具",
     page_icon="📦",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
@@ -31,94 +31,176 @@ st.markdown(
     .stApp {
         background-color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        color: #1E293B !important;
+        color: #0F172A !important;
     }
-    #MainMenu, footer, header {visibility: hidden;}
+    #MainMenu, footer, header { visibility: hidden; }
 
-    .header-box { padding: 1.5rem 0 0.8rem 0; margin-bottom: 0.6rem; }
+    /* 约束主工作区宽度，精致居中 */
+    .block-container {
+        max-width: 820px !important;
+        padding-top: 2.2rem !important;
+        padding-bottom: 3.5rem !important;
+    }
+
+    /* 顶部标题区 */
+    .header-box {
+        text-align: center;
+        padding: 0.5rem 0 0.8rem 0;
+    }
     .header-badge {
-        display: inline-block; padding: 3px 10px; font-size: 0.72rem; font-weight: 600;
-        text-transform: uppercase; background: #E2E8F0; color: #475569;
-        border-radius: 9999px; margin-bottom: 0.3rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 4px 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        background: #EEF2F6;
+        color: #475569;
+        border-radius: 9999px;
+        margin-bottom: 0.6rem;
+        border: 1px solid #E2E8F0;
     }
-    .header-title { font-size: 1.85rem; font-weight: 700; color: #0F172A; margin: 0; }
-    .header-subtitle { font-size: 0.88rem; color: #64748B; margin-top: 0.2rem; }
+    .header-title {
+        font-size: 2.1rem;
+        font-weight: 800;
+        color: #0F172A !important;
+        letter-spacing: -0.03em;
+        margin: 0;
+    }
+    .header-subtitle {
+        font-size: 0.92rem;
+        color: #64748B !important;
+        margin-top: 0.45rem;
+        font-weight: 400;
+    }
 
+    /* 顶部居中单个商品库胶囊 */
     div[data-testid="stPopover"] > button {
-        border-radius: 20px !important;
-        padding: 4px 14px !important;
-        font-size: 0.82rem !important;
-        background: #FFFFFF !important;
-        border: 1px solid #CBD5E1 !important;
+        background-color: #FFFFFF !important;
         color: #334155 !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 20px !important;
+        padding: 5px 16px !important;
+        font-size: 0.82rem !important;
+        font-weight: 500 !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
         height: auto !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
-        transition: all 0.2s ease;
     }
     div[data-testid="stPopover"] > button:hover {
         border-color: #2563EB !important;
-        color: #1E40AF !important;
-        background: #F8FAFC !important;
+        color: #1D4ED8 !important;
+        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12) !important;
+        transform: translateY(-1px);
+    }
+    div[data-testid="stPopoverBody"] {
+        border-radius: 12px !important;
+        border: 1px solid #E2E8F0 !important;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.08) !important;
     }
 
+    /* 上传框纯白高质感卡片 */
+    [data-testid="stFileUploader"] {
+        background: transparent !important;
+    }
     [data-testid="stFileUploader"] section {
         background-color: #FFFFFF !important;
-        border: 1.5px dashed #CBD5E1 !important;
-        border-radius: 12px !important;
-        padding: 1.5rem 1rem !important;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+        border: 1.8px dashed #CBD5E1 !important;
+        border-radius: 16px !important;
+        padding: 2.2rem 1.5rem !important;
+        text-align: center !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 4px 12px rgba(0, 0, 0, 0.01) !important;
+        transition: all 0.25s ease !important;
     }
     [data-testid="stFileUploader"] section:hover {
         border-color: #2563EB !important;
         background-color: #F8FAFC !important;
+        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.08) !important;
+    }
+    [data-testid="stFileUploader"] section button {
+        background-color: #0F172A !important;
+        color: #FFFFFF !important;
+        border-radius: 8px !important;
+        font-weight: 500 !important;
+        border: none !important;
+        padding: 0.4rem 1.2rem !important;
+        transition: background-color 0.2s ease !important;
+    }
+    [data-testid="stFileUploader"] section button:hover {
+        background-color: #1E293B !important;
+    }
+    [data-testid="stFileUploader"] label {
+        display: none !important;
     }
 
-    .metric-container {
+    /* 6 项 KPI 核心指标精美网格卡片 */
+    .metric-grid {
         display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 0.8rem;
-        margin: 1.2rem 0 1.5rem 0;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin: 1.6rem 0 1.8rem 0;
     }
     .metric-card {
         background: #FFFFFF;
-        padding: 1rem 0.8rem;
-        border-radius: 10px;
+        padding: 1.1rem 1rem;
+        border-radius: 12px;
         border: 1px solid #E2E8F0;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+        transition: all 0.2s ease;
     }
-    .metric-title { font-size: 0.75rem; font-weight: 500; color: #64748B; margin-bottom: 0.3rem; }
-    .metric-num { font-size: 1.45rem; font-weight: 700; color: #0F172A; line-height: 1.1; }
-    .metric-unit { font-size: 0.75rem; font-weight: 500; color: #94A3B8; margin-left: 0.2rem; }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(0,0,0,0.05);
+        border-color: #CBD5E1;
+    }
+    .metric-label {
+        font-size: 0.76rem;
+        font-weight: 600;
+        color: #64748B;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-bottom: 0.35rem;
+    }
+    .metric-value {
+        font-size: 1.55rem;
+        font-weight: 800;
+        color: #0F172A;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+    }
+    .metric-unit {
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: #94A3B8;
+        margin-left: 0.25rem;
+    }
+
+    /* 导出下载按钮 */
+    .stDownloadButton button {
+        background: #0F172A !important;
+        color: #FFFFFF !important;
+        font-size: 0.96rem !important;
+        font-weight: 600 !important;
+        border-radius: 10px !important;
+        padding: 0.7rem 1.8rem !important;
+        border: none !important;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15) !important;
+        transition: all 0.2s ease !important;
+    }
+    .stDownloadButton button:hover {
+        background: #1E293B !important;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25) !important;
+        transform: translateY(-1px);
+    }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 
-# ==================== 2. 商品库在线解密与映射 ====================
-MAPPING_FILE = "sku_mapping.json"
-
-
-def load_sku_mapping() -> Dict[str, str]:
-  if os.path.exists(MAPPING_FILE):
-    try:
-      with open(MAPPING_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-    except Exception:
-      pass
-  return {}
-
-
-def save_sku_mapping(mapping: Dict[str, str]) -> None:
-  try:
-    with open(MAPPING_FILE, "w", encoding="utf-8") as f:
-      json.dump(mapping, f, ensure_ascii=False, indent=2)
-  except Exception:
-    pass
-
-
+# ==================== 2. 商品库在线解密与加载 ====================
 def get_secret_key() -> Optional[bytes]:
   try:
     if "COMMODITIES_KEY" in st.secrets:
@@ -190,7 +272,7 @@ def load_active_commodities() -> Tuple[Optional[pd.DataFrame], str]:
   return None, "未检测到商品库"
 
 
-# ==================== 3. 复合表格解析与单号精准提取 ====================
+# ==================== 3. 复合表格解析与单号提取 ====================
 def parse_raw_order_file(uploaded_file):
   filename = str(uploaded_file.name).lower()
   df_raw = (
@@ -292,9 +374,7 @@ def extract_pcs_from_text(text):
 
 
 # ==================== 4. 核心计算与严格标准格式构建 ====================
-def process_shipment_data(
-    goods_df, order_code, commodities_df, sku_mapping=None
-):
+def process_shipment_data(goods_df, order_code, commodities_df):
   goods_df["SKU"] = goods_df["SKU"].astype(str).str.strip()
 
   comm_dict = {}
@@ -313,24 +393,26 @@ def process_shipment_data(
 
   for _, row in goods_df.iterrows():
     raw_sku = str(row["SKU"]).strip()
-    lookup_sku = (
-        sku_mapping.get(raw_sku, raw_sku) if sku_mapping else raw_sku
+    no_zf_sku = (
+        raw_sku[3:] if raw_sku.upper().startswith("ZF-") else raw_sku
+    )
+    with_zf_sku = (
+        f"ZF-{raw_sku}" if not raw_sku.upper().startswith("ZF-") else raw_sku
     )
 
-    matched = comm_dict.get(lookup_sku)
-    if not matched and lookup_sku.upper().startswith("ZF-"):
-      matched = comm_dict.get(lookup_sku[3:])
-    if not matched and not lookup_sku.upper().startswith("ZF-"):
-      matched = comm_dict.get(f"ZF-{lookup_sku}")
-    if not matched:
-      matched = comm_dict.get(raw_sku, {})
+    # 优先精确匹配，其次智能穿透 ZF- 前缀
+    matched = (
+        comm_dict.get(raw_sku)
+        or comm_dict.get(no_zf_sku)
+        or comm_dict.get(with_zf_sku)
+        or {}
+    )
 
     if not matched:
       missing_skus.append(raw_sku)
 
     item = {**row.to_dict()}
 
-    # 品名、图片与供应商
     item["_品名"] = item.get("品名") or matched.get(
         "品名", matched.get("中文品名", "")
     )
@@ -339,7 +421,6 @@ def process_shipment_data(
         "供应商名称", matched.get("供应商", matched.get("商品品牌", ""))
     )
 
-    # 单箱数量（箱规）
     local_carton = row.get("单箱数量") or row.get("单箱数量(pcs)") or 0
     cloud_carton = matched.get("单箱数量(pcs)", matched.get("单箱数量", 0))
     final_carton = pd.to_numeric(
@@ -352,7 +433,6 @@ def process_shipment_data(
         else 0
     )
 
-    # 单品 PCS
     pcs_val = pd.to_numeric(
         matched.get("单品PCS", matched.get("PCS", 0)), errors="coerce"
     )
@@ -362,7 +442,6 @@ def process_shipment_data(
         else extract_pcs_from_text(item["_品名"])
     )
 
-    # 采购单价
     price_val = 0.0
     for p_col in [
         "采购单价(CNY)",
@@ -378,7 +457,6 @@ def process_shipment_data(
           break
     item["_单价"] = price_val
 
-    # 规格尺寸与重量
     def get_dim(keys, fallback=0.0):
       for k in keys:
         if k in matched:
@@ -405,7 +483,7 @@ def process_shipment_data(
 
   df_m = pd.DataFrame(merged_rows)
 
-  # ---------- 1. 构建严格匹配的【详细数据】(23列) ----------
+  # ---------- 1. 构建严格对齐的【详细数据】(23列) ----------
   detail_cols = [
       "SKU",
       "品名",
@@ -436,11 +514,8 @@ def process_shipment_data(
   df_detail["SKU"] = df_m["SKU"]
   df_detail["品名"] = df_m["_品名"]
   df_detail["商品图片"] = df_m["_图片"]
-
-  # 单箱数量
   df_detail["单箱数量"] = df_m["_单箱数量"]
 
-  # 箱数与发货量
   if "箱数" in df_m.columns and "备货量" in df_m.columns:
     df_detail["箱数"] = (
         pd.to_numeric(df_m["箱数"], errors="coerce").fillna(0).astype(int)
@@ -468,7 +543,6 @@ def process_shipment_data(
     )
     df_detail["发货量"] = raw_qty
 
-  # 物流中心编码与货件编号
   addr_raw = ""
   for col in ["物流中心编码", "收货仓库", "配送地址"]:
     if col in df_m.columns and not df_m[col].dropna().empty:
@@ -480,7 +554,7 @@ def process_shipment_data(
   df_detail["货件编号"] = order_code
   df_detail["ReferenceId"] = df_m.get("ReferenceId", "")
 
-  # ---------- 【修改：取消自动连续编号，没有就留空】 ----------
+  # 箱号与总箱数编号：原表无则彻底留空
   box_col = pd.Series("", index=df_m.index)
   for c in ["箱号", "箱号(装箱信息)", "箱号(发货商品)"]:
     if c in df_m.columns:
@@ -514,7 +588,6 @@ def process_shipment_data(
       df_m["_高"] > 0, df_m["_高"].round(1), ""
   )
 
-  # 体积与体积重
   vol = (df_m["_长"] * df_m["_宽"] * df_m["_高"]) / 1000000
   df_detail["外箱体积(m³)"] = np.where(vol > 0, vol.round(4), "")
   tot_vol = (vol * df_detail["箱数"]).round(4)
@@ -523,7 +596,6 @@ def process_shipment_data(
   tot_vwt = (tot_vol * 167).round(2)
   df_detail["外箱总体积重(kg)"] = np.where(tot_vwt > 0, tot_vwt, "")
 
-  # 时间与物流商
   created_t = df_m.get("创建时间", "")
   if isinstance(created_t, pd.Series) and not created_t.dropna().empty:
     df_detail["创建时间"] = created_t.iloc[0]
@@ -533,11 +605,10 @@ def process_shipment_data(
   df_detail["发货时间"] = df_m.get("发货时间", "")
   df_detail["物流商"] = df_m.get("物流商", "")
 
-  # 确保无内容单元格彻底留空
   df_detail.fillna("", inplace=True)
   df_detail.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
 
-  # ---------- 2. 构建严格匹配的【汇总结果】(9列) ----------
+  # ---------- 2. 构建严格对齐的【汇总结果】(9列) ----------
   num_boxes = int(df_detail["箱数"].sum())
   sum_weight = (
       pd.to_numeric(df_detail["外箱总重量(kg)"], errors="coerce")
@@ -576,7 +647,6 @@ def process_shipment_data(
   df_summary.fillna("", inplace=True)
   df_summary.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
 
-  # 附加计算字段供网页看板使用
   total_pcs_sum = int((df_detail["发货量"] * df_m["_单品PCS"]).sum())
   total_val_sum = (df_detail["发货量"] * df_m["_单价"]).round(2).sum()
 
@@ -649,23 +719,19 @@ def export_and_beautify(df_detail, df_summary):
 
 # ==================== 6. 主程序与界面交互 ====================
 def main():
+  # 顶部标题 Header
   st.markdown(
       """
     <div class="header-box">
-        <div class="header-badge">Shipment Generator V9.3</div>
+        <div class="header-badge">✨ SHIPMENT GENERATOR V9.5</div>
         <h1 class="header-title">发货单智能生成工具</h1>
-        <p class="header-subtitle">输出格式100%对齐标准模板 · 物流关联单号联动 · 智能商品库规格匹配</p>
+        <p class="header-subtitle">输出格式 100% 对齐标准模板 · 物流关联单号联动 · 智能商品库规格匹配</p>
     </div>
     """,
       unsafe_allow_html=True,
   )
 
-  # 1. 加载特殊映射
-  if "sku_mapping" not in st.session_state:
-    st.session_state["sku_mapping"] = load_sku_mapping()
-  current_mapping = st.session_state["sku_mapping"]
-
-  # 2. 自动定位商品库
+  # 1. 自动定位商品库
   active_df, table_label = load_active_commodities()
 
   custom_uploaded = st.session_state.get("custom_commodities", None)
@@ -676,15 +742,10 @@ def main():
   else:
     table_pill_label = f"🔴 {table_label} ▾"
 
-  map_count = len(current_mapping)
-  mapping_pill_label = (
-      f"⚡ 特殊映射 ({map_count}条) ▾" if map_count > 0 else "⚡ 特殊映射 ▾"
-  )
-
-  col_p1, col_p2, _ = st.columns([1.5, 1.2, 1.3])
-
-  with col_p1:
-    with st.popover(table_pill_label):
+  # 2. 居中单个商品库胶囊（极简精致）
+  col_l, col_center, col_r = st.columns()
+  with col_center:
+    with st.popover(table_pill_label, use_container_width=True):
       st.caption("临时更换商品库（仅本次生效）：")
       st.file_uploader(
           "上传替代商品列表",
@@ -698,58 +759,14 @@ def main():
         del st.session_state["custom_commodities"]
         st.rerun()
 
-  with col_p2:
-    with st.popover(mapping_pill_label):
-      st.caption("双击编辑，支持从 Excel 复制两列直接粘贴：")
-      rows = [
-          {"面单SKU": k, "商品库SKU": v} for k, v in current_mapping.items()
-      ]
-      if not rows:
-        rows = [{"面单SKU": "", "商品库SKU": ""}]
-      df_mapping = pd.DataFrame(rows)
-
-      edited_df = st.data_editor(
-          df_mapping,
-          num_rows="dynamic",
-          use_container_width=True,
-          hide_index=True,
-          height=200,
-          column_config={
-              "面单SKU": st.column_config.TextColumn(
-                  "备货单 SKU", required=True
-              ),
-              "商品库SKU": st.column_config.TextColumn(
-                  "商品库 SKU", required=True
-              ),
-          },
-          key="sku_mapping_editor",
-      )
-
-      c_btn1, c_btn2 = st.columns(2)
-      if c_btn1.button("保存规则", type="primary", use_container_width=True):
-        new_map = {}
-        for _, r in edited_df.iterrows():
-          src = str(r.get("面单SKU", "")).strip()
-          tgt = str(r.get("商品库SKU", "")).strip()
-          if src and tgt and src not in ("nan", "None"):
-            new_map[src] = tgt
-        st.session_state["sku_mapping"] = new_map
-        save_sku_mapping(new_map)
-        st.rerun()
-
-      if c_btn2.button("清空全部", use_container_width=True):
-        st.session_state["sku_mapping"] = {}
-        save_sku_mapping({})
-        st.rerun()
-
   if custom_uploaded is not None:
     active_df = parse_raw_table_bytes(custom_uploaded.getvalue())
 
   st.write("")
 
-  # 3. 主文件上传
+  # 3. 主发货单上传卡片
   uploaded_file = st.file_uploader(
-      "请上传备货单/发货单 Excel 或 CSV 文件",
+      "上传发货单 Excel 或 CSV 文件",
       type=["xlsx", "xls", "csv"],
       help="自动识别商品行并从【物流信息】中定位【关联备货单号】",
   )
@@ -759,36 +776,36 @@ def main():
       with st.spinner("正在解析物流信息并匹配商品库数据..."):
         goods_df, related_order_code = parse_raw_order_file(uploaded_file)
         df_detail, df_summary, kpi, missing_skus = process_shipment_data(
-            goods_df, related_order_code, active_df, sku_mapping=current_mapping
+            goods_df, related_order_code, active_df
         )
 
-      # 顶部 KPI 看板
+      # 6 项核心 KPI 卡片网格
       st.markdown(
           f"""
-            <div class="metric-container">
+            <div class="metric-grid">
                 <div class="metric-card">
-                    <div class="metric-title">货件编号 (关联备货单)</div>
-                    <div class="metric-num" style="font-size:1.05rem; word-break:break-all;">{related_order_code or '—'}</div>
+                    <div class="metric-label">关联备货单号</div>
+                    <div class="metric-value" style="font-size:1.15rem; word-break:break-all;">{related_order_code or '—'}</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">总装箱量</div>
-                    <div class="metric-num">{kpi['total_box']:,}<span class="metric-unit">箱</span></div>
+                    <div class="metric-label">总装箱量</div>
+                    <div class="metric-value">{kpi['total_box']:,}<span class="metric-unit">箱</span></div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">总备货量</div>
-                    <div class="metric-num">{kpi['total_sets']:,}<span class="metric-unit">套</span></div>
+                    <div class="metric-label">总备货量</div>
+                    <div class="metric-value">{kpi['total_sets']:,}<span class="metric-unit">套</span></div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">总 PCS (单件实物)</div>
-                    <div class="metric-num">{kpi['total_pcs']:,}<span class="metric-unit">件</span></div>
+                    <div class="metric-label">总 PCS (单件实物)</div>
+                    <div class="metric-value">{kpi['total_pcs']:,}<span class="metric-unit">件</span></div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">实重 / 总体积</div>
-                    <div class="metric-num" style="font-size:1.1rem;">{kpi['total_weight']}<span class="metric-unit">kg</span> / {kpi['total_volume']}<span class="metric-unit">m³</span></div>
+                    <div class="metric-label">实重 / 总体积</div>
+                    <div class="metric-value" style="font-size:1.15rem;">{kpi['total_weight']}<span class="metric-unit">kg</span> / {kpi['total_volume']}<span class="metric-unit">m³</span></div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-title">货件总货值</div>
-                    <div class="metric-num">{kpi['total_val']}</div>
+                    <div class="metric-label">货件总货值</div>
+                    <div class="metric-value" style="font-size:1.25rem;">{kpi['total_val']}</div>
                 </div>
             </div>
             """,
@@ -816,7 +833,9 @@ def main():
           use_container_width=True,
       )
 
-      # 严格对应模板的选项卡展示
+      st.write("")
+
+      # 标签页预览
       tab1, tab2 = st.tabs(["📝 详细数据", "📊 汇总结果"])
       with tab1:
         st.dataframe(df_detail, use_container_width=True)
