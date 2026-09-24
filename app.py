@@ -19,7 +19,7 @@ import streamlit as st
 
 # ==================== 1. 页面全局配置与清爽高级 CSS ====================
 st.set_page_config(
-    page_title="发货单智能生成工具",
+    page_title="海外仓备货单处理",
     page_icon="📦",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -720,9 +720,9 @@ def main():
   st.markdown(
       """
     <div class="header-box">
-        <div class="header-badge">✨ SHIPMENT GENERATOR V9.7</div>
-        <h1 class="header-title">发货单智能生成工具</h1>
-        <p class="header-subtitle">输出格式 100% 对齐标准模板 · 物流关联单号联动 · 智能商品库规格匹配</p>
+        <div class="header-badge">✨ By Ryou</div>
+        <h1 class="header-title">海外仓备货单处理工具</h1>
+        <p class="header-subtitle"> </p>
     </div>
     """,
       unsafe_allow_html=True,
