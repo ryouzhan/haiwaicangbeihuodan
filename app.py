@@ -1,6 +1,6 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""海外仓备货单智能处理工具 (Web极简版) - 物流信息精准定位 + 在线商品库/密文同步双核驱动"""
+"""海外仓备货发货单智能处理工具 (Web版) - 格式100%严格对齐标准发货单导出模板"""
 
 from collections import defaultdict
 from datetime import datetime
@@ -17,9 +17,9 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pandas as pd
 import streamlit as st
 
-# ==================== 1. 页面配置与现代极简高级样式 ====================
+# ==================== 1. 页面全局配置与极简样式 ====================
 st.set_page_config(
-    page_title="海外仓备货发货处理工具",
+    page_title="发货单处理工具",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -44,7 +44,6 @@ st.markdown(
     .header-title { font-size: 1.85rem; font-weight: 700; color: #0F172A; margin: 0; }
     .header-subtitle { font-size: 0.88rem; color: #64748B; margin-top: 0.2rem; }
 
-    /* 顶部 Popover 胶囊按钮 (完全复刻 app.py 质感) */
     div[data-testid="stPopover"] > button {
         border-radius: 20px !important;
         padding: 4px 14px !important;
@@ -98,7 +97,7 @@ st.markdown(
 )
 
 
-# ==================== 2. 商品库在线解密与特殊映射 (安全异常捕获) ====================
+# ==================== 2. 商品库在线解密与映射 ====================
 MAPPING_FILE = "sku_mapping.json"
 
 
@@ -121,13 +120,11 @@ def save_sku_mapping(mapping: Dict[str, str]) -> None:
 
 
 def get_secret_key() -> Optional[bytes]:
-  """获取解密密钥：优先 Streamlit Secrets，其次本地 secret.key (安全捕获异常)"""
   try:
     if "COMMODITIES_KEY" in st.secrets:
       return st.secrets["COMMODITIES_KEY"].encode()
   except Exception:
     pass
-
   if os.path.exists("secret.key"):
     try:
       with open("secret.key", "rb") as f:
@@ -138,7 +135,6 @@ def get_secret_key() -> Optional[bytes]:
 
 
 def parse_raw_table_bytes(raw_bytes: bytes) -> Optional[pd.DataFrame]:
-  """从二进制字节流自动识别 Excel 或 CSV 并转为 DataFrame"""
   try:
     if raw_bytes.startswith(b"PK\x03\x04") or raw_bytes.startswith(
         b"\xd0\xcf\x11\xe0"
@@ -154,13 +150,7 @@ def parse_raw_table_bytes(raw_bytes: bytes) -> Optional[pd.DataFrame]:
 
 
 def load_active_commodities() -> Tuple[Optional[pd.DataFrame], str]:
-  """智能定位并加载商品表：
-
-  1. 优先解密云端/本地 commodities.dat
-  2. 若无则检索本地明文表格
-  """
   key = get_secret_key()
-
   if os.path.exists("commodities.dat"):
     if not key:
       return None, "未配置解密密钥 (请在 Secrets 填入 COMMODITIES_KEY)"
@@ -176,7 +166,6 @@ def load_active_commodities() -> Tuple[Optional[pd.DataFrame], str]:
     except Exception as e:
       return None, f"解密失败: {e}"
 
-  # 检索本地明文表格
   valid_exts = (".xlsx", ".xls", ".csv")
   candidates = []
   for fname in os.listdir("."):
@@ -203,21 +192,15 @@ def load_active_commodities() -> Tuple[Optional[pd.DataFrame], str]:
 
 # ==================== 3. 复合表格解析与单号精准提取 ====================
 def parse_raw_order_file(uploaded_file):
-  """精准拆解复合表格：
-
-  1. 截取有效商品明细
-  2. 定位【物流信息】区块中的【关联备货单号】作为货件编号
-  """
   filename = str(uploaded_file.name).lower()
-  if filename.endswith(".csv"):
-    df_raw = pd.read_csv(uploaded_file, header=None)
-  else:
-    df_raw = pd.read_excel(uploaded_file, header=None)
+  df_raw = (
+      pd.read_csv(uploaded_file, header=None)
+      if filename.endswith(".csv")
+      else pd.read_excel(uploaded_file, header=None)
+  )
 
-  # 寻找有效商品行截断点
   cut_idx = len(df_raw)
   split_keywords = ["备货单号", "辅料SKU", "关联备货单号", "三方仓入库单号"]
-
   for idx in range(1, len(df_raw)):
     first_cell = str(df_raw.iloc[idx, 0]).strip()
     if any(k in first_cell for k in split_keywords):
@@ -232,18 +215,16 @@ def parse_raw_order_file(uploaded_file):
 
   # 从【物流信息】中定位【关联备货单号】
   related_order_code = ""
-
   for row_idx in range(cut_idx, len(df_raw)):
     row_vals = [str(v).strip() for v in df_raw.iloc[row_idx].values]
     if "关联备货单号" in row_vals:
       col_idx = row_vals.index("关联备货单号")
       if row_idx + 1 < len(df_raw):
         val = str(df_raw.iloc[row_idx + 1, col_idx]).strip()
-        if val and val != "nan" and val != "None":
+        if val and val not in ("nan", "None"):
           related_order_code = val
           break
 
-  # 兜底正则提取 OWS / FBA
   if not related_order_code:
     for row_idx in range(cut_idx, len(df_raw)):
       for cell in df_raw.iloc[row_idx].dropna():
@@ -255,37 +236,66 @@ def parse_raw_order_file(uploaded_file):
       if related_order_code:
         break
 
-  return goods_df, (related_order_code or "未知单号")
+  return goods_df, (related_order_code or "")
 
 
-def get_region(addr):
-  addr = str(addr).upper()
-  if "AWD" in addr:
+def get_warehouse_code(addr):
+  """提取物流中心编码，附带美西/美东分区，如 'GYR3(美西)' 或 'AWD仓'"""
+  addr = str(addr).strip()
+  if not addr or addr in ("nan", "None"):
     return "AWD仓"
-  east = ["ABE8", "AVP1", "DCA6", "TEB9", "PHL7", "BDL3"]
-  central = ["DFW6", "FOE1", "MDW2", "IND7", "MEM1"]
-  west = ["IUTE", "ONT8", "LAS1", "LAX9", "GYR2", "ABQ2", "SCK4", "SMF3"]
-  if any(x in addr for x in east):
-    return "美东"
-  if any(x in addr for x in central):
-    return "美中"
-  if any(x in addr for x in west):
-    return "美西"
-  return "其他"
+  u_addr = addr.upper()
+  if "AWD" in u_addr:
+    return "AWD仓"
+
+  east = ["ABE8", "AVP1", "DCA6", "TEB9", "PHL7", "BDL3", "RDU2", "TEB6"]
+  central = [
+      "DFW6",
+      "FOE1",
+      "MDW2",
+      "IND7",
+      "MEM1",
+      "RFD2",
+      "IND9",
+      "AKR1",
+      "ITX3",
+  ]
+  west = [
+      "IUTE",
+      "ONT8",
+      "LAS1",
+      "LAX9",
+      "GYR2",
+      "GYR3",
+      "ABQ2",
+      "SCK4",
+      "SMF3",
+      "SBD1",
+      "PSP3",
+      "TCY1",
+  ]
+
+  for w in west:
+    if w in u_addr:
+      return f"{w}(美西)"
+  for c in central:
+    if c in u_addr:
+      return f"{c}(美中)"
+  for e in east:
+    if e in u_addr:
+      return f"{e}(美东)"
+  return addr
 
 
 def extract_pcs_from_text(text):
   match = re.search(r"(\d+)\s*(?:pc|pcs|PC|PCS|只|件|套)", str(text), re.I)
-  if match:
-    return int(match.group(1))
-  return 1
+  return int(match.group(1)) if match else 1
 
 
-# ==================== 4. 核心计算与商品属性合并 ====================
+# ==================== 4. 核心计算与严格标准格式构建 ====================
 def process_shipment_data(
     goods_df, order_code, commodities_df, sku_mapping=None
 ):
-  """基于商品库匹配长宽高、单箱重量、单价与PCS，完成全维度核算"""
   goods_df["SKU"] = goods_df["SKU"].astype(str).str.strip()
 
   comm_dict = {}
@@ -304,8 +314,6 @@ def process_shipment_data(
 
   for _, row in goods_df.iterrows():
     raw_sku = str(row["SKU"]).strip()
-
-    # 应用特殊 SKU 别名映射
     lookup_sku = (
         sku_mapping.get(raw_sku, raw_sku) if sku_mapping else raw_sku
     )
@@ -323,15 +331,16 @@ def process_shipment_data(
 
     item = {**row.to_dict()}
 
-    # 1. 品名与品牌
+    # 品名、图片与供应商
     item["_品名"] = item.get("品名") or matched.get(
         "品名", matched.get("中文品名", "")
     )
+    item["_图片"] = item.get("商品图片") or item.get("图片") or matched.get("图片", "")
     item["_供应商"] = matched.get(
         "供应商名称", matched.get("供应商", matched.get("商品品牌", ""))
     )
 
-    # 2. 单箱数量（箱规：一箱几套）
+    # 单箱数量（箱规）
     local_carton = row.get("单箱数量") or row.get("单箱数量(pcs)") or 0
     cloud_carton = matched.get("单箱数量(pcs)", matched.get("单箱数量", 0))
     final_carton = pd.to_numeric(
@@ -344,16 +353,17 @@ def process_shipment_data(
         else 0
     )
 
-    # 3. 单品 PCS（每套包含几个单件）
+    # 单品 PCS
     pcs_val = pd.to_numeric(
         matched.get("单品PCS", matched.get("PCS", 0)), errors="coerce"
     )
-    if not np.isnan(pcs_val) and pcs_val > 0:
-      item["_单品PCS"] = int(pcs_val)
-    else:
-      item["_单品PCS"] = extract_pcs_from_text(item["_品名"])
+    item["_单品PCS"] = (
+        int(pcs_val)
+        if not np.isnan(pcs_val) and pcs_val > 0
+        else extract_pcs_from_text(item["_品名"])
+    )
 
-    # 4. 采购单价
+    # 采购单价
     price_val = 0.0
     for p_col in [
         "采购单价(CNY)",
@@ -369,7 +379,7 @@ def process_shipment_data(
           break
     item["_单价"] = price_val
 
-    # 5. 箱规长宽高与重量
+    # 规格尺寸与重量
     def get_dim(keys, fallback=0.0):
       for k in keys:
         if k in matched:
@@ -396,24 +406,52 @@ def process_shipment_data(
 
   df_m = pd.DataFrame(merged_rows)
 
-  df_detail = pd.DataFrame()
+  # ---------- 1. 构建严格匹配的【详细数据】(23列) ----------
+  detail_cols = [
+      "SKU",
+      "品名",
+      "商品图片",
+      "发货量",
+      "箱数",
+      "单箱数量",
+      "物流中心编码",
+      "供应商",
+      "货件编号",
+      "ReferenceId",
+      "箱号",
+      "总箱数编号",
+      "外箱重量(kg)",
+      "外箱总重量(kg)",
+      "外箱长(cm)",
+      "外箱宽(cm)",
+      "外箱高(cm)",
+      "外箱体积(m³)",
+      "外箱总体积(m³)",
+      "外箱总体积重(kg)",
+      "创建时间",
+      "发货时间",
+      "物流商",
+  ]
+
+  df_detail = pd.DataFrame(columns=detail_cols)
   df_detail["SKU"] = df_m["SKU"]
   df_detail["品名"] = df_m["_品名"]
-  df_detail["货件编号"] = order_code
+  df_detail["商品图片"] = df_m["_图片"]
 
+  # 单箱数量
   df_detail["单箱数量"] = df_m["_单箱数量"]
-  df_detail["单品PCS"] = df_m["_单品PCS"]
 
+  # 箱数与发货量
   if "箱数" in df_m.columns and "备货量" in df_m.columns:
     df_detail["箱数"] = (
         pd.to_numeric(df_m["箱数"], errors="coerce").fillna(0).astype(int)
     )
-    df_detail["备货套数"] = (
+    df_detail["发货量"] = (
         pd.to_numeric(df_m["备货量"], errors="coerce").fillna(0).astype(int)
     )
-    df_detail["备货套数"] = np.where(
-        df_detail["备货套数"] > 0,
-        df_detail["备货套数"],
+    df_detail["发货量"] = np.where(
+        df_detail["发货量"] > 0,
+        df_detail["发货量"],
         df_detail["箱数"] * df_detail["单箱数量"],
     )
   else:
@@ -425,84 +463,150 @@ def process_shipment_data(
         .fillna(0)
         .astype(int)
     )
-    safe_carton = np.where(
-        df_detail["单箱数量"] > 0, df_detail["单箱数量"], 1
-    )
+    safe_c = np.where(df_detail["单箱数量"] > 0, df_detail["单箱数量"], 1)
     df_detail["箱数"] = np.where(
-        df_detail["单箱数量"] > 0,
-        np.ceil(raw_qty / safe_carton).astype(int),
-        0,
+        df_detail["单箱数量"] > 0, np.ceil(raw_qty / safe_c).astype(int), 0
     )
-    df_detail["备货套数"] = raw_qty
+    df_detail["发货量"] = raw_qty
 
-  df_detail["总PCS"] = df_detail["备货套数"] * df_detail["单品PCS"]
-
-  df_detail["单箱重量(kg)"] = df_m["_重量"].round(2)
-  df_detail["外箱总重量(kg)"] = (
-      df_detail["单箱重量(kg)"] * df_detail["箱数"]
-  ).round(2)
-  df_detail["箱规长(cm)"] = df_m["_长"].round(2)
-  df_detail["箱规宽(cm)"] = df_m["_宽"].round(2)
-  df_detail["箱规高(cm)"] = df_m["_高"].round(2)
-
-  vol = (df_m["_长"] * df_m["_宽"] * df_m["_高"]) / 1000000
-  df_detail["外箱总体积(m³)"] = (vol * df_detail["箱数"]).round(3)
-  df_detail["外箱总体积重(kg)"] = (df_detail["外箱总体积(m³)"] * 167).round(2)
-
-  df_detail["采购单价"] = df_m["_单价"].round(2)
-  df_detail["总货值(￥)"] = (
-      df_detail["备货套数"] * df_detail["采购单价"]
-  ).round(2)
-  df_detail["供应商"] = df_m["_供应商"]
-
-  addr = ""
-  for col in ["配送地址", "物流中心编码", "收货仓库"]:
-    if col in df_m.columns:
-      addr = df_m[col].iloc[0]
+  # 物流中心编码与货件编号
+  addr_raw = ""
+  for col in ["物流中心编码", "收货仓库", "配送地址"]:
+    if col in df_m.columns and not df_m[col].dropna().empty:
+      addr_raw = str(df_m[col].dropna().iloc[0]).strip()
       break
-  df_detail["配送地址"] = addr or "AWD仓"
-  df_detail["仓库分区"] = df_detail["配送地址"].apply(get_region)
+  df_detail["物流中心编码"] = get_warehouse_code(addr_raw)
 
-  summary = (
-      df_detail.groupby("货件编号")
-      .agg({
-          "仓库分区": "first",
-          "配送地址": "first",
-          "箱数": "sum",
-          "备货套数": "sum",
-          "总PCS": "sum",
-          "外箱总重量(kg)": "sum",
-          "外箱总体积(m³)": "sum",
-          "外箱总体积重(kg)": "sum",
-          "总货值(￥)": "sum",
-      })
-      .reset_index()
+  df_detail["供应商"] = df_m["_供应商"]
+  df_detail["货件编号"] = order_code
+  df_detail["ReferenceId"] = df_m.get("ReferenceId", "")
+
+  # 自动生成连续箱号 (如 1-9, 10-18)
+  box_nums = []
+  current_box_start = 1
+  for b_count in df_detail["箱数"]:
+    if b_count <= 0:
+      box_nums.append("")
+    elif b_count == 1:
+      box_nums.append(str(current_box_start))
+      current_box_start += 1
+    else:
+      end_box = current_box_start + b_count - 1
+      box_nums.append(f"{current_box_start}-{end_box}")
+      current_box_start = end_box + 1
+  df_detail["箱号"] = box_nums
+
+  total_box_count = int(df_detail["箱数"].sum())
+  df_detail["总箱数编号"] = total_box_count if total_box_count > 0 else ""
+
+  # 重量与尺寸
+  df_detail["外箱重量(kg)"] = np.where(
+      df_m["_重量"] > 0, df_m["_重量"].round(2), ""
+  )
+  total_w = (df_m["_重量"] * df_detail["箱数"]).round(2)
+  df_detail["外箱总重量(kg)"] = np.where(total_w > 0, total_w, "")
+
+  df_detail["外箱长(cm)"] = np.where(
+      df_m["_长"] > 0, df_m["_长"].round(1), ""
+  )
+  df_detail["外箱宽(cm)"] = np.where(
+      df_m["_宽"] > 0, df_m["_宽"].round(1), ""
+  )
+  df_detail["外箱高(cm)"] = np.where(
+      df_m["_高"] > 0, df_m["_高"].round(1), ""
   )
 
-  summary.rename(
-      columns={
-          "箱数": "总箱数",
-          "备货套数": "总套数",
-          "总货值(￥)": "货件总货值(￥)",
-      },
-      inplace=True,
+  # 体积与体积重
+  vol = (df_m["_长"] * df_m["_宽"] * df_m["_高"]) / 1000000
+  df_detail["外箱体积(m³)"] = np.where(vol > 0, vol.round(4), "")
+  tot_vol = (vol * df_detail["箱数"]).round(4)
+  df_detail["外箱总体积(m³)"] = np.where(tot_vol > 0, tot_vol, "")
+
+  tot_vwt = (tot_vol * 167).round(2)
+  df_detail["外箱总体积重(kg)"] = np.where(tot_vwt > 0, tot_vwt, "")
+
+  # 时间与物流商
+  created_t = df_m.get("创建时间", "")
+  if isinstance(created_t, pd.Series) and not created_t.dropna().empty:
+    df_detail["创建时间"] = created_t.iloc[0]
+  else:
+    df_detail["创建时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+  df_detail["发货时间"] = df_m.get("发货时间", "")
+  df_detail["物流商"] = df_m.get("物流商", "")
+
+  # 空值彻底格式化为空字符串（留空）
+  df_detail.fillna("", inplace=True)
+  df_detail.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
+
+  # ---------- 2. 构建严格匹配的【汇总结果】(9列) ----------
+  # 按照模板定义：['物流中心编码', '货件编号', 'ReferenceId', '品名', '供应商', '总箱数', '外箱总重量', '外箱总体积', '外箱总体积重(kg)']
+  num_boxes = int(df_detail["箱数"].sum())
+  sum_weight = (
+      pd.to_numeric(df_detail["外箱总重量(kg)"], errors="coerce")
+      .fillna(0)
+      .sum()
+  )
+  sum_volume = (
+      pd.to_numeric(df_detail["外箱总体积(m³)"], errors="coerce")
+      .fillna(0)
+      .sum()
+  )
+  sum_vol_weight = (
+      pd.to_numeric(df_detail["外箱总体积重(kg)"], errors="coerce")
+      .fillna(0)
+      .sum()
   )
 
-  return df_detail, summary, list(set(missing_skus))
+  summary_row = {
+      "物流中心编码": df_detail["物流中心编码"].iloc[0]
+      if not df_detail.empty
+      else "AWD仓",
+      "货件编号": order_code,
+      "ReferenceId": df_detail["ReferenceId"].iloc[0]
+      if not df_detail.empty
+      else "",
+      "品名": df_detail["品名"].iloc[0] if not df_detail.empty else "",
+      "供应商": df_detail["供应商"].iloc[0] if not df_detail.empty else "",
+      "总箱数": num_boxes,
+      "外箱总重量": round(sum_weight, 2) if sum_weight > 0 else "",
+      "外箱总体积": round(sum_volume, 4) if sum_volume > 0 else "",
+      "外箱总体积重(kg)": round(sum_vol_weight, 2)
+      if sum_vol_weight > 0
+      else "",
+  }
+  df_summary = pd.DataFrame([summary_row])
+  df_summary.fillna("", inplace=True)
+  df_summary.replace({"nan": "", "None": "", np.nan: ""}, inplace=True)
+
+  # 附加计算字段供网页看板使用
+  total_pcs_sum = int((df_detail["发货量"] * df_m["_单品PCS"]).sum())
+  total_val_sum = (df_detail["发货量"] * df_m["_单价"]).round(2).sum()
+
+  kpi_metrics = {
+      "total_box": num_boxes,
+      "total_sets": int(df_detail["发货量"].sum()),
+      "total_pcs": total_pcs_sum,
+      "total_weight": f"{sum_weight:,.2f}" if sum_weight > 0 else "0",
+      "total_volume": f"{sum_volume:,.3f}" if sum_volume > 0 else "0",
+      "total_val": f"￥{total_val_sum:,.2f}",
+  }
+
+  return df_detail, df_summary, kpi_metrics, list(set(missing_skus))
 
 
-# ==================== 5. 专业 Excel 导出与自动美化 ====================
+# ==================== 5. 专业 Excel 导出美化 (原汁原味) ====================
 def export_and_beautify(df_detail, df_summary):
   output = io.BytesIO()
   with pd.ExcelWriter(output, engine="openpyxl") as writer:
-    df_summary.to_excel(writer, sheet_name="汇总结果", index=False)
     df_detail.to_excel(writer, sheet_name="详细数据", index=False)
+    df_summary.to_excel(writer, sheet_name="汇总结果", index=False)
 
   wb = load_workbook(output)
   header_fill = PatternFill(
       start_color="1E293B", end_color="1E293B", fill_type="solid"
   )
-  header_font = Font(color="FFFFFF", bold=True, name="微软雅黑", size=10)
+  header_font = Font(color="FFFFFF", bold=True, name="Calibri", size=11)
   stripe_fill = PatternFill(
       start_color="F8FAFC", end_color="F8FAFC", fill_type="solid"
   )
@@ -516,7 +620,7 @@ def export_and_beautify(df_detail, df_summary):
       horizontal="center", vertical="center", wrap_text=True
   )
 
-  for sheetname in ["汇总结果", "详细数据"]:
+  for sheetname in ["详细数据", "汇总结果"]:
     ws = wb[sheetname]
     for i, row in enumerate(ws.iter_rows(min_row=1, max_row=ws.max_row)):
       for cell in row:
@@ -532,13 +636,14 @@ def export_and_beautify(df_detail, df_summary):
       max_len = 0
       col_letter = col[0].column_letter
       for cell in col:
+        v = str(cell.value) if cell.value is not None else ""
         try:
-          length = len(str(cell.value).encode("gbk"))
+          length = len(v.encode("gbk"))
           if length > max_len:
             max_len = length
         except:
           pass
-      ws.column_dimensions[col_letter].width = min(max(max_len + 4, 12), 45)
+      ws.column_dimensions[col_letter].width = min(max(max_len + 4, 12), 48)
 
   final_stream = io.BytesIO()
   wb.save(final_stream)
@@ -550,15 +655,15 @@ def main():
   st.markdown(
       """
     <div class="header-box">
-        <div class="header-badge">AWD Cloud Engine V9.1</div>
-        <h1 class="header-title">海外仓备货发货单智能处理</h1>
-        <p class="header-subtitle">物流信息单号联动 · 在线安全商品库同步 · 箱规重量体积货值全核算</p>
+        <div class="header-badge">Shipment Generator V9.2</div>
+        <h1 class="header-title">发货单智能生成工具</h1>
+        <p class="header-subtitle">输出格式100%对齐标准模板 · 物流关联单号联动 · 智能商品库规格匹配</p>
     </div>
     """,
       unsafe_allow_html=True,
   )
 
-  # 1. 特殊映射字典
+  # 1. 加载特殊映射
   if "sku_mapping" not in st.session_state:
     st.session_state["sku_mapping"] = load_sku_mapping()
   current_mapping = st.session_state["sku_mapping"]
@@ -579,13 +684,12 @@ def main():
       f"⚡ 特殊映射 ({map_count}条) ▾" if map_count > 0 else "⚡ 特殊映射 ▾"
   )
 
-  # 3. 顶部胶囊组件
   col_p1, col_p2, _ = st.columns([1.5, 1.2, 1.3])
 
   with col_p1:
     with st.popover(table_pill_label):
       st.caption("临时更换商品库（仅本次生效）：")
-      custom_file = st.file_uploader(
+      st.file_uploader(
           "上传替代商品列表",
           type=["xlsx", "xls", "csv"],
           label_visibility="collapsed",
@@ -630,7 +734,7 @@ def main():
         for _, r in edited_df.iterrows():
           src = str(r.get("面单SKU", "")).strip()
           tgt = str(r.get("商品库SKU", "")).strip()
-          if src and tgt and src != "nan" and tgt != "nan":
+          if src and tgt and src not in ("nan", "None"):
             new_map[src] = tgt
         st.session_state["sku_mapping"] = new_map
         save_sku_mapping(new_map)
@@ -646,7 +750,7 @@ def main():
 
   st.write("")
 
-  # 4. 主发货单上传
+  # 3. 主文件上传
   uploaded_file = st.file_uploader(
       "请上传备货单/发货单 Excel 或 CSV 文件",
       type=["xlsx", "xls", "csv"],
@@ -657,43 +761,37 @@ def main():
     try:
       with st.spinner("正在解析物流信息并匹配商品库数据..."):
         goods_df, related_order_code = parse_raw_order_file(uploaded_file)
-        df_detail, df_summary, missing_skus = process_shipment_data(
+        df_detail, df_summary, kpi, missing_skus = process_shipment_data(
             goods_df, related_order_code, active_df, sku_mapping=current_mapping
         )
 
-      total_box = int(df_summary["总箱数"].sum())
-      total_sets = int(df_summary["总套数"].sum())
-      total_pcs = int(df_summary["总PCS"].sum())
-      total_wt = f"{df_summary['外箱总重量(kg)'].sum():,.2f}"
-      total_vol = f"{df_summary['外箱总体积(m³)'].sum():,.2f}"
-      total_val = f"￥{df_summary['货件总货值(￥)'].sum():,.2f}"
-
+      # 顶部 KPI 看板
       st.markdown(
           f"""
             <div class="metric-container">
                 <div class="metric-card">
                     <div class="metric-title">货件编号 (关联备货单)</div>
-                    <div class="metric-num" style="font-size:1.05rem; word-break:break-all;">{related_order_code}</div>
+                    <div class="metric-num" style="font-size:1.05rem; word-break:break-all;">{related_order_code or '—'}</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">总装箱量</div>
-                    <div class="metric-num">{total_box:,}<span class="metric-unit">箱</span></div>
+                    <div class="metric-num">{kpi['total_box']:,}<span class="metric-unit">箱</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">总备货量</div>
-                    <div class="metric-num">{total_sets:,}<span class="metric-unit">套</span></div>
+                    <div class="metric-num">{kpi['total_sets']:,}<span class="metric-unit">套</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">总 PCS (单件实物)</div>
-                    <div class="metric-num">{total_pcs:,}<span class="metric-unit">件</span></div>
+                    <div class="metric-num">{kpi['total_pcs']:,}<span class="metric-unit">件</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">实重 / 总体积</div>
-                    <div class="metric-num" style="font-size:1.15rem;">{total_wt}<span class="metric-unit">kg</span> / {total_vol}<span class="metric-unit">m³</span></div>
+                    <div class="metric-num" style="font-size:1.1rem;">{kpi['total_weight']}<span class="metric-unit">kg</span> / {kpi['total_volume']}<span class="metric-unit">m³</span></div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-title">货件总货值</div>
-                    <div class="metric-num">{total_val}</div>
+                    <div class="metric-num">{kpi['total_val']}</div>
                 </div>
             </div>
             """,
@@ -706,23 +804,27 @@ def main():
             f" {', '.join(missing_skus[:8])}{'...' if len(missing_skus) > 8 else ''}"
         )
 
+      # 导出按钮
       ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+      filename_tag = f"_{related_order_code}" if related_order_code else ""
+      out_filename = f"发货单处理结果{filename_tag}_{ts}.xlsx"
       excel_bytes = export_and_beautify(df_detail, df_summary)
 
       st.download_button(
-          label="⬇️ 导出全量发货单与汇总表 (.xlsx)",
+          label="⬇️ 导出标准发货单与汇总表 (.xlsx)",
           data=excel_bytes,
-          file_name=f"发货单处理结果_{related_order_code}_{ts}.xlsx",
+          file_name=out_filename,
           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
           type="primary",
           use_container_width=True,
       )
 
-      tab1, tab2 = st.tabs(["📊 货件汇总表", "📝 计算明细表"])
+      # 严格对应模板的选项卡展示
+      tab1, tab2 = st.tabs(["📝 详细数据", "📊 汇总结果"])
       with tab1:
-        st.dataframe(df_summary, use_container_width=True)
-      with tab2:
         st.dataframe(df_detail, use_container_width=True)
+      with tab2:
+        st.dataframe(df_summary, use_container_width=True)
 
     except Exception as e:
       st.error(f"❌ 数据处理失败：{str(e)}")
