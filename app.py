@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""海外仓备货发货单智能生成工具 (纯净极简版) - 无特殊映射 · 在线商品库自动同步 · 彻底解决 float64 类型冲突"""
+"""海外仓备货发货单智能生成工具 (纯净极简版) - 白净清爽风 · 在线商品库自动同步 · 格式严格对齐标准模板"""
 
 from collections import defaultdict
 from datetime import datetime
@@ -17,7 +17,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pandas as pd
 import streamlit as st
 
-# ==================== 1. 页面全局配置与定制高质感 CSS ====================
+# ==================== 1. 页面全局配置与清爽高级 CSS ====================
 st.set_page_config(
     page_title="发货单智能生成工具",
     page_icon="📦",
@@ -28,6 +28,7 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+    /* 全局背景 */
     .stApp {
         background-color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -35,12 +36,14 @@ st.markdown(
     }
     #MainMenu, footer, header { visibility: hidden; }
 
+    /* 约束主工作区宽度，优雅居中 */
     .block-container {
         max-width: 820px !important;
         padding-top: 2.2rem !important;
         padding-bottom: 3.5rem !important;
     }
 
+    /* 顶部标题区 */
     .header-box {
         text-align: center;
         padding: 0.5rem 0 0.8rem 0;
@@ -74,30 +77,44 @@ st.markdown(
         font-weight: 400;
     }
 
-    div[data-testid="stPopover"] > button {
+    /* 【核心修复】顶部商品库胶囊：纯白底色、清晰深黑字、微阴影、彻底消除黑底 */
+    div[data-testid="stPopover"] button,
+    div[data-testid="stPopover"] button:focus,
+    div[data-testid="stPopover"] button:active {
         background-color: #FFFFFF !important;
-        color: #334155 !important;
+        background: #FFFFFF !important;
+        color: #0F172A !important;
         border: 1px solid #CBD5E1 !important;
-        border-radius: 20px !important;
-        padding: 5px 16px !important;
-        font-size: 0.82rem !important;
-        font-weight: 500 !important;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+        border-radius: 24px !important;
+        padding: 6px 18px !important;
+        font-size: 0.84rem !important;
+        font-weight: 600 !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
         height: auto !important;
     }
-    div[data-testid="stPopover"] > button:hover {
+    div[data-testid="stPopover"] button * {
+        color: #0F172A !important;
+        font-weight: 600 !important;
+    }
+    div[data-testid="stPopover"] button:hover {
+        background-color: #F8FAFC !important;
         border-color: #2563EB !important;
         color: #1D4ED8 !important;
-        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12) !important;
+        box-shadow: 0 3px 8px rgba(37, 99, 235, 0.12) !important;
         transform: translateY(-1px);
+    }
+    div[data-testid="stPopover"] button:hover * {
+        color: #1D4ED8 !important;
     }
     div[data-testid="stPopoverBody"] {
         border-radius: 12px !important;
         border: 1px solid #E2E8F0 !important;
         box-shadow: 0 10px 25px rgba(0,0,0,0.08) !important;
+        background: #FFFFFF !important;
     }
 
+    /* 【核心修复】上传卡片：边框柔和，Upload 按钮改为精致品牌蓝，不再黑沉沉 */
     [data-testid="stFileUploader"] {
         background: transparent !important;
     }
@@ -107,7 +124,7 @@ st.markdown(
         border-radius: 16px !important;
         padding: 2.2rem 1.5rem !important;
         text-align: center !important;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 4px 12px rgba(0, 0, 0, 0.01) !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
         transition: all 0.25s ease !important;
     }
     [data-testid="stFileUploader"] section:hover {
@@ -116,21 +133,27 @@ st.markdown(
         box-shadow: 0 6px 20px rgba(37, 99, 235, 0.08) !important;
     }
     [data-testid="stFileUploader"] section button {
-        background-color: #0F172A !important;
+        background-color: #2563EB !important;
         color: #FFFFFF !important;
         border-radius: 8px !important;
-        font-weight: 500 !important;
+        font-weight: 600 !important;
         border: none !important;
-        padding: 0.4rem 1.2rem !important;
-        transition: background-color 0.2s ease !important;
+        padding: 0.45rem 1.4rem !important;
+        box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2) !important;
+        transition: all 0.2s ease !important;
+    }
+    [data-testid="stFileUploader"] section button * {
+        color: #FFFFFF !important;
     }
     [data-testid="stFileUploader"] section button:hover {
-        background-color: #1E293B !important;
+        background-color: #1D4ED8 !important;
+        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
     }
     [data-testid="stFileUploader"] label {
         display: none !important;
     }
 
+    /* 6 项 KPI 核心指标精美网格卡片 */
     .metric-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -172,6 +195,7 @@ st.markdown(
         margin-left: 0.25rem;
     }
 
+    /* 导出下载按钮 */
     .stDownloadButton button {
         background: #0F172A !important;
         color: #FFFFFF !important;
@@ -289,7 +313,6 @@ def parse_raw_order_file(uploaded_file):
   goods_df = goods_df.loc[:, ~goods_df.columns.str.startswith("Unnamed")]
   goods_df.dropna(how="all", inplace=True)
 
-  # 从【物流信息】中定位【关联备货单号】
   related_order_code = ""
   for row_idx in range(cut_idx, len(df_raw)):
     row_vals = [str(v).strip() for v in df_raw.iloc[row_idx].values]
@@ -476,7 +499,6 @@ def process_shipment_data(goods_df, order_code, commodities_df):
 
   df_m = pd.DataFrame(merged_rows)
 
-  # 发货量与箱数
   carton_series = df_m["_单箱数量"].astype(int)
   if "箱数" in df_m.columns and "备货量" in df_m.columns:
     box_series = (
@@ -533,7 +555,7 @@ def process_shipment_data(goods_df, order_code, commodities_df):
   if not z_col:
     z_col = ["" for _ in range(len(df_m))]
 
-  # 体积与重量计算 (完全使用纯 Python 列表推导式，彻底杜绝 float64 写入 '' 报错)
+  # 体积与重量计算
   vols = [
       (l * w * h) / 1000000
       for l, w, h in zip(df_m["_长"], df_m["_宽"], df_m["_高"])
@@ -594,9 +616,7 @@ def process_shipment_data(goods_df, order_code, commodities_df):
       "物流商": df_m.get("物流商", pd.Series([""] * len(df_m))).tolist(),
   }
 
-  df_detail = pd.DataFrame(detail_data)
-  # 统一转为 object 彻底防崩溃
-  df_detail = df_detail.astype(object)
+  df_detail = pd.DataFrame(detail_data).astype(object)
   df_detail = df_detail.replace({"nan": "", "None": "", np.nan: "", None: ""})
 
   # 构建【汇总结果】(9 列严格对齐)
@@ -625,7 +645,6 @@ def process_shipment_data(goods_df, order_code, commodities_df):
   df_summary = pd.DataFrame(summary_data).astype(object)
   df_summary = df_summary.replace({"nan": "", "None": "", np.nan: "", None: ""})
 
-  # KPI 看板数据
   total_pcs_sum = int(sum(qty_series * df_m["_单品PCS"].astype(int)))
   total_val_sum = round(sum(qty_series * df_m["_单价"].astype(float)), 2)
 
@@ -701,7 +720,7 @@ def main():
   st.markdown(
       """
     <div class="header-box">
-        <div class="header-badge">✨ SHIPMENT GENERATOR V9.6</div>
+        <div class="header-badge">✨ SHIPMENT GENERATOR V9.7</div>
         <h1 class="header-title">发货单智能生成工具</h1>
         <p class="header-subtitle">输出格式 100% 对齐标准模板 · 物流关联单号联动 · 智能商品库规格匹配</p>
     </div>
